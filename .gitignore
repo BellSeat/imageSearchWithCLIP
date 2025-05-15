@@ -1,3 +1,5 @@
 database/raw/video/*
 *.log
 
+# excepects
+!database/raw/*
