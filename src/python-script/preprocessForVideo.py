@@ -3,6 +3,10 @@ import os
 import cv2
 import datetime
 import shlex
+from log_util import setup_local_logger
+logger = setup_local_logger()
+ffmpegLogger = setup_local_logger('logs/ffempg.log')
+
 # check if ffmpeg is installed
 def check_ffmpeg():
     try:
@@ -22,18 +26,18 @@ def get_Pframe_timestamps(video_path):
         raise RuntimeError(f"ffprobe error: {result.stderr}")
     timestamps = []
     for line in result.stdout.splitlines():
-        # print(line)
+        # logger.info(line)
         parts = line.split(',')
         i = 0
-        if len(parts) >= 3 and parts[0] == 'frame' and parts[2] in ['I', 'P']:
-            # print(parts)
+        if len(parts) >= 3 and parts[0] == 'frame' and parts[2] in ['I']:
+            # logger.info(parts)
 
             try: 
                 timestamp = float(parts[1])
                 timestamps.append(timestamp)
             except ValueError:
                 continue
-    print(f"Extracted {len(timestamps)} keyframes")
+    logger.info(f"Extracted {len(timestamps)} keyframes")
     return timestamps
 
 # extract keyframes from video
@@ -41,9 +45,9 @@ def extract_keyframmes(video_path, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     timestamps = get_Pframe_timestamps(video_path)
-    print(f'Timestamps: {timestamps}')
+    logger.info(f'Timestamps: {timestamps}')
     if not timestamps:
-        print("No keyframes found in the video.")
+        logger.info("No keyframes found in the video.")
         return
     
     for i,ts in enumerate(timestamps,start=1):
@@ -55,18 +59,20 @@ def extract_keyframmes(video_path, output_dir):
             'ffmpeg', '-ss', str(ts), '-i', video_path, '-frames:v', '1', 
             '-q:v', '2', '-update', '1', output_file
         ]
+
     
         try:
-            subprocess.run(command, check=True)
-            print(f"Keyframes extracted to {output_dir}")
+            results = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ffmpegLogger.info(results.stdout)
+
         except subprocess.CalledProcessError as e:
-            print(f"Error extracting keyframes: {e}")
+            logger.info(f"Error extracting keyframes: {e}")
 
 # name the ouput directory
 def get_video_info(video_path):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print("Error opening video file")
+        logger.info("Error opening video file")
         return None
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
     cap.release()
@@ -104,4 +110,4 @@ if __name__ == "__main__":
     if check_ffmpeg():
         extract_keyframmes(video_path, output_dir)
     else:
-        print("ffmpeg is not installed. Please install ffmpeg to use this script.")
+        logger.info("ffmpeg is not installed. Please install ffmpeg to use this script.")
