@@ -1,0 +1,24 @@
+{
+    "index":{
+        "INDEX_PATH": "clip_vector.index",
+        "META_PATH": "clip_metadata.pkl",
+        "IMAGE_DIR": "images",
+        "VECTOR_DIM": 512,
+        "DEVICE": "cuda",
+        "INDEX_TYPE": "IVF",
+        "INDEX_NLIST": 100,
+        "INDEX_NPROBE": 10,
+        "INDEX_M": 16,
+        "INDEX_NORM": "L2",
+        "INDEX_NORM_TYPE": "L2",
+        "INDEX_NORM_DIM": 512
+    },
+    "CLIP":{
+        "MODEL_NAME": "ViT-B/32",
+        "MODEL_PATH": "ViT-B-32.pt",
+        "IMAGE_SIZE": 224,
+        "IMAGE_MEAN": [0.48145466, 0.4578275, 0.40821073],
+        "IMAGE_STD": [0.26862954, 0.26130258, 0.27577711],
+        "DEVICE": "cuda"
+    }
+}

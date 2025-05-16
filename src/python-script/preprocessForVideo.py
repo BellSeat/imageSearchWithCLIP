@@ -105,7 +105,13 @@ def format_time(seconds):
     return str(td).replace(':','-').replace('.','-')
 # main function
 if __name__ == "__main__":
-    video_path = "/Users/qingranshao/demo/imageSearchWithCLIP/sample/video/sample.mp4" 
+    # check if the platform is Windows
+    import platform
+    video_path = ""
+    if platform.system() == "Windows":
+        video_path = os.path.abspath(r"E:\demo\imageSearchWithCLIP\sample\video\sample.mp4").replace('\\', '/')
+    else:
+        video_path = r"..\..\sample\video\sample.mp4" 
     output_dir = build_output_dir(video_path)
     if check_ffmpeg():
         extract_keyframmes(video_path, output_dir)
