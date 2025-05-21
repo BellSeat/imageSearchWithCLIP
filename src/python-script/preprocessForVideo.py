@@ -111,7 +111,7 @@ if __name__ == "__main__":
     if platform.system() == "Windows":
         video_path = os.path.abspath(r"E:\demo\imageSearchWithCLIP\sample\video\sample.mp4").replace('\\', '/')
     else:
-        video_path = r"..\..\sample\video\sample.mp4" 
+        video_path = r"/Users/qingranshao/demo/imageSearchWithCLIP/sample/video/sample.mp4" 
     output_dir = build_output_dir(video_path)
     if check_ffmpeg():
         extract_keyframmes(video_path, output_dir)
