@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 # Workaround for OpenMP runtime error (OMP: Error #15)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# Add the parent directory to the system path to allow importing modules from 'core'
+# Add parent directory to sys.path for core module imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.embedding import Embedding
@@ -26,14 +26,18 @@ logger = setup_local_logger(log_path="logs/api_run.log", logger_name="fastapi_ap
 
 # --- Configuration Paths ---
 SCRIPT_DIR = os.path.dirname(__file__)
-CONFIG_PATH = os.path.join(SCRIPT_DIR,"..","config", "config.json")
+CONFIG_PATH = os.path.join(SCRIPT_DIR,"..", "config", "config.json")
 
 UPLOAD_TEMP_DIR = os.path.join(SCRIPT_DIR, "temp_uploads") 
 
+# Root for all static content served by FastAPI
 STATIC_CONTENT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "database"))
+
+# Specific static content sub-directories
 FRAMES_DIR = os.path.join(STATIC_CONTENT_ROOT, "raw", "video", "frames")
 UPLOADED_IMAGES_DIR = os.path.join(STATIC_CONTENT_ROOT, "uploaded_images")
 
+# Ensure all necessary directories exist
 os.makedirs(UPLOAD_TEMP_DIR, exist_ok=True)
 os.makedirs(FRAMES_DIR, exist_ok=True)
 os.makedirs(UPLOADED_IMAGES_DIR, exist_ok=True)
@@ -48,7 +52,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- Pydantic Models ---
+# --- Pydantic Models for Request/Response Schemas ---
 class AddImageResponse(BaseModel):
     message: str
     uploaded_url: str
@@ -122,23 +126,32 @@ async def save_upload_file_temporarily(upload_file: UploadFile) -> str:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to save uploaded file: {e}")
 
 # --- Helper Function to Convert File System Path to Web URL ---
-# This function now generates an absolute URL including the base URL of the FastAPI app.
 def get_web_url_from_fs_path(fs_path: str) -> str:
     """
     Converts a server-side file system path to a web-accessible absolute URL.
     Assumes the FastAPI app is running on http://localhost:8000.
     """
-    base_url = "http://localhost:8000" # <--- IMPORTANT: Match your FastAPI's actual base URL
+    base_url = "http://localhost:8000" # Match your FastAPI's actual base URL
 
-    if fs_path.startswith(FRAMES_DIR):
-        relative_path = os.path.relpath(fs_path, FRAMES_DIR).replace("\\", "/")
-        return f"{base_url}/static/frames/{relative_path}"
-    elif fs_path.startswith(UPLOADED_IMAGES_DIR):
-        relative_path = os.path.relpath(fs_path, UPLOADED_IMAGES_DIR).replace("\\", "/")
-        return f"{base_url}/static/uploads/{relative_path}"
+    # Normalize paths for consistent comparison, especially on Windows
+    normalized_fs_path = os.path.normpath(fs_path)
+    normalized_frames_dir = os.path.normpath(FRAMES_DIR)
+    normalized_uploaded_images_dir = os.path.normpath(UPLOADED_IMAGES_DIR)
+
+    web_url = fs_path # Default to raw path if no match
+
+    if normalized_fs_path.startswith(normalized_frames_dir):
+        relative_path = os.path.relpath(normalized_fs_path, normalized_frames_dir).replace("\\", "/")
+        web_url = f"{base_url}/static/frames/{relative_path}"
+        logger.debug(f"Converted '{fs_path}' (frames) to URL: {web_url}")
+    elif normalized_fs_path.startswith(normalized_uploaded_images_dir):
+        relative_path = os.path.relpath(normalized_fs_path, normalized_uploaded_images_dir).replace("\\", "/")
+        web_url = f"{base_url}/static/uploads/{relative_path}"
+        logger.debug(f"Converted '{fs_path}' (uploads) to URL: {web_url}")
     else:
         logger.warning(f"Could not determine static URL for path: {fs_path}. Returning raw path.")
-        return fs_path
+        
+    return web_url
 
 
 # --- FastAPI Lifespan Events ---
@@ -157,6 +170,9 @@ async def startup_event():
         vectordb = await run_in_threadpool(VectorDatabase, config_path=CONFIG_PATH)
         await run_in_threadpool(vectordb.load)
         logger.info(f"Vector Database initialized and loaded. Current entries: {vectordb.get_total_count()}")
+
+        logger.info(f"Configured FRAMES_DIR: {FRAMES_DIR}")
+        logger.info(f"Configured UPLOADED_IMAGES_DIR: {UPLOADED_IMAGES_DIR}")
 
     except FileNotFoundError:
         logger.critical(f"Config file not found at {CONFIG_PATH}. Please ensure it exists.", exc_info=True)
