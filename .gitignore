@@ -1,5 +1,5 @@
 database/raw/video/*
 *.log
-
+*/*.DS_Store
 # excepects
 !database/raw/*
