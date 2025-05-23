@@ -1,0 +1,8 @@
+astapi
+uvicorn[standard]
+pydantic
+numpy
+faiss-cpu
+torch 
+clip
+Pillow
