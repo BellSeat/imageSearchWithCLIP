@@ -26,7 +26,7 @@ logger = setup_local_logger(log_path="logs/api_run.log", logger_name="fastapi_ap
 
 # --- Configuration Paths ---
 SCRIPT_DIR = os.path.dirname(__file__)
-CONFIG_PATH = os.path.join(SCRIPT_DIR,"..", "config", "config.json")
+CONFIG_PATH = os.path.join(SCRIPT_DIR,"..","config", "config.json")
 
 UPLOAD_TEMP_DIR = os.path.join(SCRIPT_DIR, "temp_uploads") 
 
@@ -105,8 +105,6 @@ app.mount("/static/uploads", StaticFiles(directory=UPLOADED_IMAGES_DIR), name="s
 logger.info(f"Serving uploaded images from: {UPLOADED_IMAGES_DIR} under /static/uploads/")
 
 # --- Helper Function for File Uploads ---
-# This function MUST be defined at the top-level of the script,
-# before any endpoint functions that call it.
 async def save_upload_file_temporarily(upload_file: UploadFile) -> str:
     """Saves an uploaded file to a temporary location and returns its path."""
     try:
@@ -124,16 +122,20 @@ async def save_upload_file_temporarily(upload_file: UploadFile) -> str:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to save uploaded file: {e}")
 
 # --- Helper Function to Convert File System Path to Web URL ---
+# This function now generates an absolute URL including the base URL of the FastAPI app.
 def get_web_url_from_fs_path(fs_path: str) -> str:
     """
-    Converts a server-side file system path to a web-accessible URL based on static mounts.
+    Converts a server-side file system path to a web-accessible absolute URL.
+    Assumes the FastAPI app is running on http://localhost:8000.
     """
+    base_url = "http://localhost:8000" # <--- IMPORTANT: Match your FastAPI's actual base URL
+
     if fs_path.startswith(FRAMES_DIR):
         relative_path = os.path.relpath(fs_path, FRAMES_DIR).replace("\\", "/")
-        return f"/static/frames/{relative_path}"
+        return f"{base_url}/static/frames/{relative_path}"
     elif fs_path.startswith(UPLOADED_IMAGES_DIR):
         relative_path = os.path.relpath(fs_path, UPLOADED_IMAGES_DIR).replace("\\", "/")
-        return f"/static/uploads/{relative_path}"
+        return f"{base_url}/static/uploads/{relative_path}"
     else:
         logger.warning(f"Could not determine static URL for path: {fs_path}. Returning raw path.")
         return fs_path
