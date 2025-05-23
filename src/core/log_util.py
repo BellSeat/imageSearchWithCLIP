@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+import builtins
 
 def setup_local_logger(log_path="logs/run.log", logger_name="default"):
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -17,15 +18,20 @@ def setup_local_logger(log_path="logs/run.log", logger_name="default"):
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-        # Console handler (optional)
+        # Optional: print to console
         if logger_name == "default":
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-        # Redirect print only once for main logger
-        if logger_name == "default":
-            import builtins
-            builtins.print = lambda *args, **kwargs: logger.info(" ".join(str(a) for a in args))
+            # ✅ Safe print override to prevent infinite recursion
+            original_print = builtins.print
+            def safe_print(*args, **kwargs):
+                msg = " ".join(str(a) for a in args)
+                try:
+                    logger.info(msg)
+                except Exception:
+                    original_print(msg)
+            builtins.print = safe_print
 
     return logger

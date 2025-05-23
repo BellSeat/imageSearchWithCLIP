@@ -43,7 +43,12 @@ class VectorDatabase:
 
     def load(self):
         if not os.path.exists(self.index_path) or not os.path.exists(self.metadata_path):
-            raise FileNotFoundError("Index or metadata file not found.")
+            print(f"[❌] Index or metadata file not found at {self.index_path} or {self.metadata_path}.")
+            print("[INFO] Creating a new index and new meta.")
+            self.index = faiss.IndexFlatL2(self.vector_dim)
+            self.metadata = []
+            self.save() # This call to save() will now create directories if they don't exist.
+            #raise FileNotFoundError("Index or metadata file not found.") # This line was commented out, which is good for creating new on missing.
 
         self.index = faiss.read_index(self.index_path)
         with open(self.metadata_path, 'rb') as f:
@@ -55,7 +60,12 @@ class VectorDatabase:
         if self.index is None or self.metadata is None:
             raise ValueError("Index or metadata not initialized.")
 
+        # Ensure the directory for the index file exists
+        os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
         faiss.write_index(self.index, self.index_path)
+        
+        # Ensure the directory for the metadata file exists
+        os.makedirs(os.path.dirname(self.metadata_path), exist_ok=True)
         with open(self.metadata_path, 'wb') as f:
             pickle.dump(self.metadata, f)
         print(f"[✅] Index and metadata saved.")

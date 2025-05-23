@@ -1,0 +1,43 @@
+// src/locales/zh.ts
+
+const zh = {
+  appTitle: "图像与文本搜索应用",
+  appDescription: "使用 CLIP 和 FAISS 进行相似性搜索",
+  backendStatus: "后端状态",
+  statusReady: "就绪",
+  statusDegraded: "降级或未就绪",
+  statusOffline: "离线",
+  addSectionTitle: "添加图像到数据库",
+  selectImageFile: "选择图像文件:",
+  imageDescription: "图像描述 (可选):",
+  imageDescriptionPlaceholder: "例如：一只在草地上的猫",
+  addImageButton: "添加图像",
+  processing: "处理中...",
+  searchSectionTitle: "搜索图像",
+  searchTextSearch: "按文本搜索",
+  searchTextPlaceholder: "例如：一只狗在公园里",
+  searchTextButton: "按文本搜索",
+  searchImageSearch: "按图像搜索",
+  selectSearchImage: "选择图像文件:",
+  searchImageButton: "按图像搜索",
+  resultsSectionTitle: "搜索结果",
+  path: "路径",
+  distance: "距离",
+  noResultsFound: "没有找到任何结果。请尝试不同的查询或添加更多图像到数据库。",
+  messageSelectImageToAdd: "请选择要添加的图像。",
+  messageAddingImage: "正在添加图像...",
+  messageImageAddedSuccess: "图像添加成功:",
+  messageFailedToAddImage: "添加图像失败:",
+  messageNetworkError: "网络错误:",
+  messageEnterTextForSearch: "请输入搜索文本。",
+  messageSearchingByText: "正在按文本搜索...",
+  messageTextSearchFailed: "文本搜索失败:",
+  messageSelectImageForSearch: "请选择要搜索的图像。",
+  messageSearchingByImage: "正在按图像搜索...",
+  messageImageSearchFailed: "图像搜索失败:",
+  imageNotFound: "图像未找到",
+  language: "语言",
+};
+
+export default zh;
+export type TranslationKeys = keyof typeof zh;

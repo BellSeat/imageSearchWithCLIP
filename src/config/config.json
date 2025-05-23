@@ -1,7 +1,7 @@
 {
     "index":{
-        "INDEX_PATH": "clip_vector.index",
-        "META_PATH": "clip_metadata.pkl",
+        "INDEX_PATH": "../../database/vector/clip_vector.index",
+        "META_PATH": "../../database/meta/clip_metadata.pkl",
         "IMAGE_DIR": "images",
         "VECTOR_DIM": 512,
         "DEVICE": "cuda",

@@ -3,7 +3,7 @@ import os
 import cv2
 import datetime
 import shlex
-from log_util import setup_local_logger
+from core.log_util import setup_local_logger
 logger = setup_local_logger()
 ffmpegLogger = setup_local_logger('logs/ffempg.log')
 

@@ -17,6 +17,7 @@ class Embedding:
         clip_cfg = config.get("CLIP", {})
 
         self.device = clip_cfg.get("DEVICE", "cpu")
+        self.device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         self.model_name = clip_cfg.get("MODEL_NAME", "ViT-B/32")
         self.model, self.preporcess = clip.load(self.model_name, device=self.device)
         self.model.eval()
