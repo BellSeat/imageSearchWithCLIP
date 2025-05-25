@@ -1,0 +1,13 @@
+# File: .pylintrc
+
+[MAIN]
+# Load the Pydantic plugin to understand FastAPI models
+plugins=pylint_pydantic
+
+[MESSAGES CONTROL]
+# Disable messages that are often too noisy for FastAPI/ML projects
+disable=
+    C0103, # invalid-name (for short variable names like x, y, f)
+    R0903, # too-few-public-methods (Pydantic models often have few methods)
+    E0401, # import-error (Let's trust the requirements.txt)
+    W0613  # unused-argument (FastAPI dependencies can look like unused args)
