@@ -1,0 +1,19 @@
+# File: requirements.txt
+
+# Core API and Server
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+
+# Machine Learning & Embeddings
+torch
+transformers
+sentence-transformers
+faiss-cpu
+Pillow
+numpy
+
+# Linter for CI/CD
+pylint
+pylint-pydantic
