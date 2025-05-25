@@ -3,6 +3,10 @@ import json
 import pickle
 import numpy as np
 import faiss
+from .log_util import setup_local_logger
+
+# Logger is already set up correctly at the module level.
+logger = setup_local_logger( log_path="logs/vector_db.log", logger_name="vector_db" )
 
 class VectorDatabase:
     def __init__(self, config_path=None):
@@ -39,36 +43,41 @@ class VectorDatabase:
         self.index = index
         self.metadata = metadata
         self.save()
-        print(f"[INFO] Created index with {len(metadata)} vectors.")
+        # Replaced print with logger.info
+        logger.info("Created index with %d vectors.", len(metadata))
 
     def load(self):
         if not os.path.exists(self.index_path) or not os.path.exists(self.metadata_path):
-            print(f"[❌] Index or metadata file not found at {self.index_path} or {self.metadata_path}.")
-            print("[INFO] Creating a new index and new meta.")
+            # Replaced print with logger.warning, as this is a recoverable condition
+            logger.warning("Index or metadata file not found at %s or %s.", self.index_path, self.metadata_path)
+            logger.info("Creating a new, empty index and metadata file.")
             self.index = faiss.IndexFlatL2(self.vector_dim)
             self.metadata = []
-            self.save() # This call to save() will now create directories if they don't exist.
-            #raise FileNotFoundError("Index or metadata file not found.") # This line was commented out, which is good for creating new on missing.
+            self.save() # This call will create directories if they don't exist.
+            return # Exit the load function after creating a new index
 
         self.index = faiss.read_index(self.index_path)
+        # Note: 'rb' is correct for pickle
         with open(self.metadata_path, 'rb') as f:
             self.metadata = pickle.load(f)
 
-        print(f"[INFO] Loaded index from {self.index_path}, metadata entries: {len(self.metadata)}")
+        # Replaced print with logger.info
+        logger.info("Loaded index from %s, metadata entries: %d", self.index_path, len(self.metadata))
 
     def save(self):
         if self.index is None or self.metadata is None:
             raise ValueError("Index or metadata not initialized.")
 
-        # Ensure the directory for the index file exists
         os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
         faiss.write_index(self.index, self.index_path)
         
-        # Ensure the directory for the metadata file exists
         os.makedirs(os.path.dirname(self.metadata_path), exist_ok=True)
+        # Note: 'wb' is correct for pickle
         with open(self.metadata_path, 'wb') as f:
             pickle.dump(self.metadata, f)
-        print(f"[✅] Index and metadata saved.")
+        
+        # Replaced print with logger.info
+        logger.info("Index and metadata saved successfully.")
 
     def add_vectors(self, vectors, metadata):
         if self.index is None:
@@ -77,7 +86,8 @@ class VectorDatabase:
         vectors = np.array(vectors).astype('float32')
         self.index.add(vectors)
         self.metadata.extend(metadata)
-        print(f"[INFO] Added {len(metadata)} new vectors.")
+        # Replaced print with logger.info
+        logger.info("Added %d new vectors to the index.", len(metadata))
 
     def search(self, query_vector, top_k=5):
         if self.index is None:
@@ -89,7 +99,11 @@ class VectorDatabase:
         return results
 
     def has_path(self, path):
-        return path in self.metadata
+        # This check might be slow if metadata is very large. Consider a more efficient lookup if needed.
+        for item in self.metadata:
+            if isinstance(item, dict) and item.get('path') == path:
+                return True
+        return False
 
     def get_total_count(self):
         if self.index is None:

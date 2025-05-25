@@ -23,13 +23,17 @@ print("[INFO] Starting main_cml.py")
 print("[INFO] Current working directory:", os.getcwd())
 
 def main():
+
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONFIG_PATH = os.path.join(CURRENT_DIR, "..", "config", "config.json")
+    DEFUALT_IMAGE_PATH = os.path.join(CURRENT_DIR, "..", "database", "raw", "video", "frames", "sample_2025-05-16_01-06-10_frames_1200", "frame_0004_0-00-04-504500.jpg")
     parser = argparse.ArgumentParser(description="Process images/video and interact with vector database.")
     parser.add_argument("--image", type=str, help="Path to a single image file to embed and add to DB.")
-    parser.add_argument("--image_folder", type=str, help="Path to a folder containing images to embed and add to DB.", default=r"E:\demo\imageSearchWithCLIP\database\raw\video\frames\sample_2025-05-16_01-06-10_frames_1200")
+    parser.add_argument("--image_folder", type=str, help="Path to a folder containing images to embed and add to DB.", default=DEFUALT_IMAGE_PATH)
     parser.add_argument("--text", type=str, help="Text description (optional) for single image.", default="")
     parser.add_argument("--search_text", type=str, help="Text query to search for in the database.", default="")
-    parser.add_argument("--search_image", type=str, help="Path to an image file to use as a query for searching the database.", default=r"E:\demo\imageSearchWithCLIP\database\raw\video\frames\sample_2025-05-16_01-06-10_frames_1200\frame_0004_0-00-04-504500.jpg")
-    parser.add_argument("--config", type=str, help="Path to config.json", default=r"E:\demo\imageSearchWithCLIP\src\config\config.json")
+    parser.add_argument("--search_image", type=str, help="Path to an image file to use as a query for searching the database.", default=DEFUALT_IMAGE_PATH)
+    parser.add_argument("--config", type=str, help="Path to config.json", default=CONFIG_PATH)
     
     # parser.add_argument("--video", type=str, help="Path to video file to process.") # Uncomment if video processing is needed later
     
