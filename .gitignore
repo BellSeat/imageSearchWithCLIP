@@ -1,5 +1,8 @@
 database/raw/video/*
 *.log
 */*.DS_Store
+*.mp4
+*.mkv
+
 # excepects
 !database/raw/*

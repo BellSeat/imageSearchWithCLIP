@@ -5,6 +5,7 @@ import pickle
 import json
 from vector_database import VectorDatabase
 
+
 def test_vector_database():
     # Create a temporary directory for isolated testing
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,6 +68,7 @@ def test_vector_database():
         assert db2.has_path("b.jpg")
 
         print("[✅ TEST COMPLETED SUCCESSFULLY]")
+
 
 if __name__ == "__main__":
     test_vector_database()

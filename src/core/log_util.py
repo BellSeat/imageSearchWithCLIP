@@ -5,6 +5,7 @@ import os
 import sys
 import builtins
 
+
 def setup_local_logger(log_path="logs/run.log", logger_name="default"):
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
@@ -12,7 +13,8 @@ def setup_local_logger(log_path="logs/run.log", logger_name="default"):
     logger.setLevel(logging.INFO)
 
     if not logger.handlers:  # Prevent adding handlers multiple times
-        formatter = logging.Formatter("[%(asctime)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(
+            "[%(asctime)s] %(message)s", "%Y-%m-%d %H:%M:%S")
 
         file_handler = logging.FileHandler(log_path, mode='w')
         file_handler.setFormatter(formatter)
@@ -26,6 +28,7 @@ def setup_local_logger(log_path="logs/run.log", logger_name="default"):
 
             # ✅ Safe print override to prevent infinite recursion
             original_print = builtins.print
+
             def safe_print(*args, **kwargs):
                 msg = " ".join(str(a) for a in args)
                 try:
