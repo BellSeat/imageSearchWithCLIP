@@ -1,4 +1,7 @@
+
 import os
+
+# -*- coding: utf-8 -*-
 import json
 import pickle
 import numpy as np
@@ -11,11 +14,16 @@ logger = setup_local_logger(
 
 
 class VectorDatabase:
+    """
+    A class to manage a vector database using FAISS for indexing and searching.
+    This class supports creating, loading, saving, and searching vectors with associated metadata.
+    It also supports adding new vectors and checking for existing paths in the metadata.
+    """
     def __init__(self, config_path=None):
         if config_path is None:
             raise ValueError("Config path must be provided.")
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
 
         index_cfg = config.get("index", {})
@@ -30,6 +38,12 @@ class VectorDatabase:
         self.metadata = []
 
     def create_index(self, vectors, metadata):
+        """
+        Create a FAISS index from the provided vectors and metadata.
+        Args:
+            vectors (list of list): List of vectors to index.
+            metadata (list): List of metadata corresponding to the vectors.
+        """ 
         vectors = np.array(vectors).astype('float32')
         assert vectors.shape[1] == self.vector_dim, "Vector dimension mismatch"
 
@@ -37,7 +51,7 @@ class VectorDatabase:
             quantizer = faiss.IndexFlatL2(self.vector_dim)
             index = faiss.IndexIVFFlat(
                 quantizer, self.vector_dim, self.nlist, faiss.METRIC_L2)
-            index.train(vectors)
+            index.train(vectors,None)
             index.nprobe = self.nprobe
         else:
             index = faiss.IndexFlatL2(self.vector_dim)

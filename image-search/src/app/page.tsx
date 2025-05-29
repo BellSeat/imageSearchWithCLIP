@@ -492,14 +492,17 @@ export default function HomePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchResults.map((result, index) => (
                 <div key={index} className="bg-white rounded-lg shadow-md overflow-hidden">
-                  <img
+                  <img 
                     src={result.path}
                     alt={`Search Result ${index + 1}`}
                     className="w-full h-48 object-cover"
                     onError={(e: React.SyntheticEvent<HTMLImageElement, Event>) => {
                       e.currentTarget.onerror = null;
                       e.currentTarget.src = `https://placehold.co/400x300/cccccc/333333?text=${t('imageNotFound')}`;
-                    }}
+                      }
+                    }
+                    width={440}
+                    height={550}
                   />
                   <div className="p-4">
                     <p className="text-sm font-medium text-gray-900 truncate" title={result.path}>
