@@ -1,15 +1,20 @@
 database/raw/video/*
 *.log
 */*.DS_Store
+
+# Video files
 *.mp4
 *.mkv
+
+# database files
 *.pkl
 *.index
+
+# Image files
+*.gif
 *.png
 *.jpg
 *.jpeg
-*.mp4
-
 
 
 # excepects
