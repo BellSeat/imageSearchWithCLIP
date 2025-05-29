@@ -3,6 +3,14 @@ database/raw/video/*
 */*.DS_Store
 *.mp4
 *.mkv
+*.pkl
+*.index
+*.png
+*.jpg
+*.jpeg
+*.mp4
+
+
 
 # excepects
 !database/raw/*
