@@ -23,12 +23,20 @@ class VectorDatabase:
         if config_path is None:
             raise ValueError("Config path must be provided.")
 
+<<<<<<< HEAD
+=======
+        config_path = os.path.abspath(config_path)
+        config_dir = os.path.dirname(config_path)
+        # Core modules live under src/, so use that as the base for relative paths.
+        self.src_root = os.path.abspath(os.path.join(config_dir, ".."))
+
+>>>>>>> 923a478 (feat: Update dependencies and enhance configuration handling)
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
 
         index_cfg = config.get("index", {})
-        self.index_path = index_cfg["INDEX_PATH"]
-        self.metadata_path = index_cfg["META_PATH"]
+        self.index_path = self._resolve_path(index_cfg["INDEX_PATH"])
+        self.metadata_path = self._resolve_path(index_cfg["META_PATH"])
         self.vector_dim = index_cfg.get("VECTOR_DIM", 512)
         self.index_type = index_cfg.get("INDEX_TYPE", "Flat")
         self.nlist = index_cfg.get("INDEX_NLIST", 100)
@@ -36,6 +44,32 @@ class VectorDatabase:
 
         self.index = None
         self.metadata = []
+
+    def _resolve_path(self, raw_path):
+        """
+        Normalizes paths provided in the config. Supports:
+        1. Absolute paths (returned as-is).
+        2. Paths like "/database/..." which should be resolved inside the repo's src/database folder.
+        3. Relative paths, resolved relative to the src root (same behavior as other modules).
+        """
+        if not raw_path:
+            raise ValueError("Configuration path values cannot be empty.")
+
+        cleaned = raw_path.strip()
+        cleaned = os.path.normpath(cleaned)
+        cleaned_posix = cleaned.replace("\\", "/")
+
+        # Case 1: treat "/database/..." as "src/database/..."
+        if cleaned_posix.startswith("/database/"):
+            rel_path = cleaned_posix.lstrip("/")  # drop the leading slash
+            return os.path.abspath(os.path.join(self.src_root, rel_path))
+
+        # Case 2: already absolute -> return as-is
+        if os.path.isabs(cleaned):
+            return cleaned
+
+        # Case 3: plain relative path -> anchor to src root
+        return os.path.abspath(os.path.join(self.src_root, cleaned))
 
     def create_index(self, vectors, metadata):
         """
