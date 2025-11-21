@@ -23,14 +23,11 @@ class VectorDatabase:
         if config_path is None:
             raise ValueError("Config path must be provided.")
 
-<<<<<<< HEAD
-=======
         config_path = os.path.abspath(config_path)
         config_dir = os.path.dirname(config_path)
         # Core modules live under src/, so use that as the base for relative paths.
         self.src_root = os.path.abspath(os.path.join(config_dir, ".."))
 
->>>>>>> 923a478 (feat: Update dependencies and enhance configuration handling)
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
 
