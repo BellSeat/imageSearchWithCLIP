@@ -1,20 +1,20 @@
 // src/components/LanguageSwitcher.tsx
-'use client'; // This is a client component
+'use client';
 
 import React from 'react';
-import { useTranslation } from '../hooks/useTranslation'; // Import the custom hook
+import { useTranslation } from '../hooks/useTranslation';
 
 export const LanguageSwitcher: React.FC = () => {
   const { t, language, setLanguage } = useTranslation();
 
   return (
-    <div className="mt-2">
+    <div>
       <label htmlFor="language-select" className="sr-only">{t('language')}</label>
       <select
         id="language-select"
         value={language}
         onChange={(e) => setLanguage(e.target.value)}
-        className="block mx-auto mt-2 px-3 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+        className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-bold text-white shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-200/40"
       >
         <option value="en">English</option>
         <option value="zh">中文</option>

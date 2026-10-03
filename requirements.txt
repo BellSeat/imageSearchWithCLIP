@@ -7,10 +7,16 @@ pydantic
 python-multipart
 
 # Machine Learning & Embeddings
-torch
+# The project is configured for the CUDA-enabled Windows build. If you deploy
+# on a CPU-only machine, replace these two pins with the matching CPU wheels.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+clip @ git+https://github.com/openai/CLIP.git
 transformers
 sentence-transformers
 faiss-cpu
+opencv-python
 Pillow
 numpy
 

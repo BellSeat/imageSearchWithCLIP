@@ -1,13 +1,30 @@
 import subprocess
+import subprocess
 import os
+import json
 import cv2
 import datetime
 import shlex
+import time
+import uuid
 from .log_util import setup_local_logger
 
 logger = setup_local_logger()
 # Corrected typo: ffempg.log to ffmpeg.log
 ffmpegLogger = setup_local_logger('logs/ffmpeg.log')
+
+
+class VideoProcessingCancelled(Exception):
+    """Raised when a background video job is cancelled."""
+
+
+def wait_for_processing(resume_event=None, cancel_event=None):
+    while resume_event is not None and not resume_event.is_set():
+        if cancel_event is not None and cancel_event.is_set():
+            raise VideoProcessingCancelled()
+        time.sleep(0.2)
+    if cancel_event is not None and cancel_event.is_set():
+        raise VideoProcessingCancelled()
 
 # check if ffmpeg is installed
 
@@ -25,31 +42,36 @@ def check_ffmpeg():
 # extract keyframes from video
 
 
-def get_keyframe_timestamps(video_path: str) -> list:  # Renamed for clarity
+def get_keyframe_timestamps(video_path: str, cancel_event=None) -> list:
     cmd = [
         "ffprobe",
-        "-select_streams", "v",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-skip_frame", "nokey",
         "-show_frames",
-        "-show_entries", "frame=pict_type,best_effort_timestamp_time,coded_picture_number",
-        "-of", "csv",
+        "-show_entries", "frame=pict_type,best_effort_timestamp_time",
+        "-of", "json",
         video_path
     ]
     try:
-        result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, check=True)  # Added check=True
+        if cancel_event is not None and cancel_event.is_set():
+            raise VideoProcessingCancelled()
+        result = subprocess.run(cmd, shell=False, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, check=True)
         if result.returncode != 0:
             raise RuntimeError(f"ffprobe error: {result.stderr}")
         timestamps = []
-        for line in result.stdout.splitlines():
-            parts = line.split(',')
-            # Only 'I' frames for keyframes
-            if len(parts) >= 3 and parts[0] == 'frame' and parts[2] == 'I':
-                try:
-                    timestamp = float(parts[1])
-                    timestamps.append(timestamp)
-                    
-                except ValueError:
-                    continue
+        probe_data = json.loads(result.stdout or "{}")
+        for frame in probe_data.get("frames", []):
+            if frame.get("pict_type") != "I":
+                continue
+            timestamp_value = frame.get("best_effort_timestamp_time")
+            if timestamp_value is None:
+                continue
+            try:
+                timestamps.append(float(timestamp_value))
+            except (TypeError, ValueError):
+                continue
         logger.info(f"Extracted {len(timestamps)} keyframes from {video_path}")
         return timestamps
     except subprocess.CalledProcessError as e:
@@ -60,7 +82,7 @@ def get_keyframe_timestamps(video_path: str) -> list:  # Renamed for clarity
 
 
 # Renamed to extract_keyframes, returns paths
-def extract_keyframes(video_path, output_dir):
+def extract_keyframes(video_path, output_dir, cancel_event=None, resume_event=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -68,7 +90,7 @@ def extract_keyframes(video_path, output_dir):
         raise RuntimeError(
             "FFmpeg is not installed, cannot extract keyframes.")
 
-    timestamps = get_keyframe_timestamps(video_path)
+    timestamps = get_keyframe_timestamps(video_path, cancel_event)
     logger.info(f'Keyframe Timestamps: {timestamps}')
     if not timestamps:
         logger.info(f"No keyframes found in video: {video_path}.")
@@ -76,6 +98,7 @@ def extract_keyframes(video_path, output_dir):
 
     extracted_frame_paths = []
     for i, ts in enumerate(timestamps, start=1):
+        wait_for_processing(resume_event, cancel_event)
         index_str = f"{i:04d}"
         timestamps_str = format_time(ts)  # Assuming format_time is defined
         output_file = os.path.join(
@@ -87,14 +110,26 @@ def extract_keyframes(video_path, output_dir):
         ]
 
         try:
-            results = subprocess.run(
-                command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while process.poll() is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    process.terminate()
+                    process.wait(timeout=5)
+                    raise VideoProcessingCancelled()
+                time.sleep(0.1)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    process.returncode, command, output=stdout, stderr=stderr)
             ffmpegLogger.info(
-                f"FFmpeg output for {output_file}: {results.stdout.strip()}")
-            if results.stderr:  # Log stderr for warnings/non-fatal errors
+                f"FFmpeg output for {output_file}: {stdout.strip()}")
+            if stderr:  # Log stderr for warnings/non-fatal errors
                 ffmpegLogger.warning(
-                    f"FFmpeg stderr for {output_file}: {results.stderr.strip()}")
+                    f"FFmpeg stderr for {output_file}: {stderr.strip()}")
             extracted_frame_paths.append(output_file)
+        except VideoProcessingCancelled:
+            raise
         except subprocess.CalledProcessError as e:
             logger.error(
                 f"Error extracting keyframe {output_file}: {e.stderr}", exc_info=True)
@@ -126,8 +161,12 @@ def build_output_dir(video_path):
 
     formatted_date = now.strftime("%Y-%m-%d_%H-%M-%S")
 
-    dir_name = f"{video_name}_{formatted_date}_frames_{total_frames if total_frames is not None else 'unknown'}"
-    output_dir = os.path.join("database", "raw", "video", "frames", dir_name)
+    dir_name = (
+        f"{video_name}_{formatted_date}_{uuid.uuid4().hex[:8]}_frames_"
+        f"{total_frames if total_frames is not None else 'unknown'}"
+    )
+    source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    output_dir = os.path.join(source_root, "database", "raw", "video", "frames", dir_name)
     os.makedirs(output_dir, exist_ok=True)
     logger.info(f"Built output directory for video frames: {output_dir}")
     return output_dir

@@ -4,6 +4,7 @@ import json
 import uuid
 import shutil
 import datetime
+import asyncio
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, status
@@ -17,6 +18,7 @@ from src.core.log_util import setup_local_logger
 from src.core.embedding import Embedding
 from src.core.vector_database import VectorDatabase
 import src.core.preprocessForVideo as preprocess
+from src.core.video_job_manager import JobCancelled, VideoJob, VideoJobManager
 
 
 # Workaround for OpenMP runtime error (OMP: Error #15)
@@ -44,6 +46,13 @@ FRAMES_DIR = os.path.join(STATIC_CONTENT_ROOT, "raw", "video", "frames")
 UPLOADED_IMAGES_DIR = os.path.join(STATIC_CONTENT_ROOT, "uploaded_images")
 VIDEO_UPLOAD_DIR = os.path.join(STATIC_CONTENT_ROOT, "uploaded_videos")
 VIDEO_CLIPS_DIR = os.path.join(STATIC_CONTENT_ROOT, "video_clips")
+PROJECT_DATABASE_ROOT = os.path.abspath(
+    os.path.join(SCRIPT_DIR, "..", "..", "database"))
+LEGACY_FRAMES_DIR = os.path.join(
+    PROJECT_DATABASE_ROOT, "raw", "video", "frames")
+VIDEO_JOB_WORKERS = min(max(int(os.getenv("VIDEO_JOB_WORKERS", "10")), 1), 10)
+VIDEO_EMBED_CONCURRENCY = min(
+    max(int(os.getenv("VIDEO_EMBED_CONCURRENCY", "2")), 1), VIDEO_JOB_WORKERS)
 
 # Ensure all necessary directories exist
 os.makedirs(UPLOAD_TEMP_DIR, exist_ok=True)
@@ -101,6 +110,24 @@ class UploadVideoResponse(BaseModel):
     task_id: str
 
 
+class VideoJobResponse(BaseModel):
+    id: str
+    filename: str
+    status: str
+    progress: int
+    stage: str
+    frame_count: int
+    processed_frames: int
+    error: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class VideoJobSubmissionResponse(BaseModel):
+    message: str
+    jobs: List[VideoJobResponse]
+
+
 class SearchVideoResultItem(BaseModel):
     video_url: str
     frame_url: str
@@ -121,19 +148,34 @@ class HealthCheckResponse(BaseModel):
     embedding_model_loaded: bool
     vector_database_loaded: bool
     database_entry_count: int
+    compute_device: str
+    cuda_available: bool
+    video_worker_count: int
     details: Optional[str] = None
 
 
-# --- CORS Middleware ---
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+class ResetDatabaseRequest(BaseModel):
+    delete_media: bool = False
 
+
+class ResetDatabaseResponse(BaseModel):
+    message: str
+    deleted_entries: int
+    deleted_media_items: int
+
+
+embedder = None
+vectordb = None
+video_job_manager = VideoJobManager(worker_count=VIDEO_JOB_WORKERS)
+embedding_semaphore = asyncio.Semaphore(VIDEO_EMBED_CONCURRENCY)
+vector_database_lock = asyncio.Lock()
+
+
+# --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["http://localhost", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -225,6 +267,133 @@ def get_web_url_from_fs_path(fs_path: str) -> str:
     return web_url
 
 
+def clear_directory_contents(directory: str) -> int:
+    """Remove files and subdirectories owned by the application."""
+    if not os.path.isdir(directory):
+        os.makedirs(directory, exist_ok=True)
+        return 0
+
+    deleted_items = 0
+    for entry in os.scandir(directory):
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path)
+            else:
+                os.remove(entry.path)
+            deleted_items += 1
+        except OSError as e:
+            logger.warning("Could not remove reset item %s: %s", entry.path, e)
+    return deleted_items
+
+
+def video_job_response(job: VideoJob) -> VideoJobResponse:
+    return VideoJobResponse(
+        id=job.id,
+        filename=job.filename,
+        status=job.status,
+        progress=job.progress,
+        stage=job.stage,
+        frame_count=job.frame_count,
+        processed_frames=job.processed_frames,
+        error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def save_video_upload(upload_file: UploadFile, destination: str):
+    with open(destination, "wb") as buffer:
+        shutil.copyfileobj(upload_file.file, buffer)
+
+
+async def cleanup_video_job(job: VideoJob):
+    paths = [job.upload_path, job.processed_frames_dir]
+    for path in paths:
+        if path and os.path.exists(path):
+            if os.path.isdir(path):
+                await run_in_threadpool(shutil.rmtree, path)
+            else:
+                await run_in_threadpool(os.remove, path)
+
+
+async def process_video_job(job: VideoJob):
+    """Process one queued video with cooperative pause/cancel checkpoints."""
+    try:
+        if not preprocess.check_ffmpeg():
+            raise RuntimeError("FFmpeg is not installed on the server.")
+        if embedder is None or vectordb is None:
+            raise RuntimeError("Embedding model or vector database is not ready.")
+
+        await video_job_manager.wait_if_paused(job)
+        await video_job_manager.update(
+            job.id, stage="Extracting keyframes", progress=5)
+        processed_frames_dir = await run_in_threadpool(
+            preprocess.build_output_dir, job.upload_path)
+        job.processed_frames_dir = processed_frames_dir
+
+        extracted_frame_paths = await run_in_threadpool(
+            preprocess.extract_keyframes,
+            job.upload_path,
+            processed_frames_dir,
+            job.cancel_event,
+            job.resume_event,
+        )
+        await video_job_manager.wait_if_paused(job)
+        if not extracted_frame_paths:
+            raise RuntimeError("No keyframes could be extracted from the video.")
+
+        total_frames = len(extracted_frame_paths)
+        await video_job_manager.update(
+            job.id, frame_count=total_frames, stage="Embedding keyframes", progress=20)
+
+        batch_embeddings = []
+        batch_metadata = []
+        for index, frame_path in enumerate(extracted_frame_paths, start=1):
+            await video_job_manager.wait_if_paused(job)
+            async with embedding_semaphore:
+                frame_embedding = await run_in_threadpool(
+                    embedder.embed_image, frame_path)
+            if frame_embedding is not None:
+                batch_embeddings.append(frame_embedding)
+                batch_metadata.append({
+                    "path": frame_path,
+                    "video_path": job.upload_path,
+                    "frame_filename": os.path.basename(frame_path),
+                    "is_keyframe": True,
+                })
+            progress = 20 + int((index / total_frames) * 70)
+            await video_job_manager.update(
+                job.id,
+                processed_frames=index,
+                progress=min(progress, 90),
+                stage=f"Embedding frame {index} of {total_frames}",
+            )
+
+        if not batch_embeddings:
+            raise RuntimeError("No keyframes could be embedded.")
+
+        await video_job_manager.wait_if_paused(job)
+        await video_job_manager.update(job.id, stage="Saving to vector database", progress=95)
+        async with vector_database_lock:
+            await run_in_threadpool(vectordb.add_vectors,
+                                    batch_embeddings, batch_metadata)
+            await run_in_threadpool(vectordb.save)
+
+        await video_job_manager.update(
+            job.id, status="completed", progress=100, stage="Completed",
+            processed_frames=len(batch_embeddings), error=None)
+        logger.info("Completed video job %s for %s", job.id, job.filename)
+    except (JobCancelled, preprocess.VideoProcessingCancelled):
+        await cleanup_video_job(job)
+        raise JobCancelled()
+    except Exception as error:
+        await cleanup_video_job(job)
+        await video_job_manager.update(
+            job.id, status="failed", stage="Failed", error=str(error))
+        logger.error("Video job %s failed for %s: %s", job.id, job.filename, error,
+                     exc_info=True)
+
+
 # --- FastAPI Lifespan Events ---
 @app.on_event("startup")
 async def startup_event():
@@ -250,6 +419,10 @@ async def startup_event():
         logger.info(f"Configured UPLOADED_IMAGES_DIR: {UPLOADED_IMAGES_DIR}")
         logger.info(f"Configured VIDEO_UPLOAD_DIR: {VIDEO_UPLOAD_DIR}")
         logger.info(f"Configured VIDEO_CLIPS_DIR: {VIDEO_CLIPS_DIR}")
+        await video_job_manager.start(process_video_job, cleanup_video_job)
+        logger.info(
+            "Started %d background video workers with %d concurrent GPU embedding slots.",
+            VIDEO_JOB_WORKERS, VIDEO_EMBED_CONCURRENCY)
 
     except FileNotFoundError as e:
         logger.critical(
@@ -273,6 +446,7 @@ async def shutdown_event():
     """
     logger.info("FastAPI application shutdown initiated.")
     global vectordb
+    await video_job_manager.stop()
     if vectordb:
         try:
             await run_in_threadpool(vectordb.save)
@@ -327,9 +501,10 @@ async def add_single_image(
 
         logger.info(
             f"Adding image embedding to database. Path: {persistent_image_path}")
-        await run_in_threadpool(vectordb.add_vectors,
-                                [image_embedding], [metadata])
-        await run_in_threadpool(vectordb.save)
+        async with vector_database_lock:
+            await run_in_threadpool(vectordb.add_vectors,
+                                    [image_embedding], [metadata])
+            await run_in_threadpool(vectordb.save)
 
         web_accessible_url = get_web_url_from_fs_path(persistent_image_path)
 
@@ -411,9 +586,10 @@ async def add_images_from_folder(
         if batch_embeddings:
             logger.info(
                 f"Adding {len(batch_embeddings)} embeddings to database in batch...")
-            await run_in_threadpool(vectordb.add_vectors,
-                                    batch_embeddings, batch_metadata)
-            await run_in_threadpool(vectordb.save)
+            async with vector_database_lock:
+                await run_in_threadpool(vectordb.add_vectors,
+                                        batch_embeddings, batch_metadata)
+                await run_in_threadpool(vectordb.save)
             logger.info(
                 f"Successfully processed {processed_count} images from folder "
                 f"and added to database. Failed: {failed_count}")
@@ -555,6 +731,107 @@ async def search_by_image(
                     f"Failed to remove leftover temp query image file {temp_image_path}: {e}")
 
 
+@app.post("/video-jobs", response_model=VideoJobSubmissionResponse,
+          status_code=status.HTTP_202_ACCEPTED,
+          summary="Queue multiple videos for background processing")
+async def create_video_jobs(
+    video_files: List[UploadFile] = File(...,
+                                         description="One or more video files."),
+):
+    if embedder is None or vectordb is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Service not ready. Embedding model or database not initialized.")
+    if not preprocess.check_ffmpeg():
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="FFmpeg is not installed on the server.")
+
+    supported_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.webm')
+    saved_paths = []
+    try:
+        for upload in video_files:
+            original_filename = upload.filename or "uploaded_video"
+            safe_filename = os.path.basename(original_filename.replace("\\", "/"))
+            if not safe_filename.lower().endswith(supported_extensions):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported video format: {safe_filename}")
+
+            destination = os.path.join(
+                VIDEO_UPLOAD_DIR, f"{uuid.uuid4()}_{safe_filename}")
+            await run_in_threadpool(save_video_upload, upload, destination)
+            saved_paths.append((original_filename, destination))
+
+        jobs = [await video_job_manager.submit(filename, path)
+                for filename, path in saved_paths]
+        return VideoJobSubmissionResponse(
+            message=f"Queued {len(jobs)} video processing job(s).",
+            jobs=[video_job_response(job) for job in jobs],
+        )
+    except HTTPException:
+        for _, path in saved_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        raise
+    except Exception as error:
+        for _, path in saved_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        logger.error("Could not queue video jobs: %s", error, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Could not queue video jobs: {error}") from error
+
+
+@app.get("/video-jobs", response_model=List[VideoJobResponse],
+         summary="List video processing jobs")
+async def list_video_jobs():
+    jobs = await video_job_manager.list()
+    return [video_job_response(job) for job in jobs]
+
+
+@app.get("/video-jobs/{job_id}", response_model=VideoJobResponse,
+         summary="Get a video processing job")
+async def get_video_job(job_id: str):
+    try:
+        job = await video_job_manager.get(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Video job not found.") from error
+    return video_job_response(job)
+
+
+@app.post("/video-jobs/{job_id}/pause", response_model=VideoJobResponse,
+          summary="Pause a video processing job")
+async def pause_video_job(job_id: str):
+    try:
+        job = await video_job_manager.pause(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Video job not found.") from error
+    return video_job_response(job)
+
+
+@app.post("/video-jobs/{job_id}/resume", response_model=VideoJobResponse,
+          summary="Resume a video processing job")
+async def resume_video_job(job_id: str):
+    try:
+        job = await video_job_manager.resume(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Video job not found.") from error
+    return video_job_response(job)
+
+
+@app.post("/video-jobs/{job_id}/cancel", response_model=VideoJobResponse,
+          summary="Cancel a video processing job")
+async def cancel_video_job(job_id: str):
+    try:
+        job = await video_job_manager.cancel(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Video job not found.") from error
+    return video_job_response(job)
+
+
 @app.post("/upload-and-process-video", response_model=UploadVideoResponse,
           summary="Upload and process video for embedding")
 async def upload_and_process_video(
@@ -573,12 +850,16 @@ async def upload_and_process_video(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Service not ready. Embedding model or database not initialized.")
 
-    if not video_file.filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+    original_filename = video_file.filename or "uploaded_video"
+    safe_filename = os.path.basename(original_filename.replace("\\", "/"))
+    supported_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.webm')
+
+    if not safe_filename.lower().endswith(supported_extensions):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Unsupported video format. Only MP4, AVI, MOV, MKV are supported.")
+                            detail="Unsupported video format. Only MP4, AVI, MOV, MKV, and WEBM are supported.")
 
     unique_id = str(uuid.uuid4())
-    video_filename = f"{unique_id}_{video_file.filename}"
+    video_filename = f"{unique_id}_{safe_filename}"
     uploaded_video_path = os.path.join(VIDEO_UPLOAD_DIR, video_filename)
 
     # 1. Save uploaded video
@@ -640,9 +921,10 @@ async def upload_and_process_video(
                     f"Failed to embed keyframe: {frame_path}. Skipping.")
 
         if batch_embeddings:
-            await run_in_threadpool(vectordb.add_vectors,
-                                    batch_embeddings, batch_metadata)
-            await run_in_threadpool(vectordb.save)
+            async with vector_database_lock:
+                await run_in_threadpool(vectordb.add_vectors,
+                                        batch_embeddings, batch_metadata)
+                await run_in_threadpool(vectordb.save)
             logger.info(
                 f"Successfully embedded and stored {len(batch_embeddings)} "
                 f"keyframes for {video_file.filename}")
@@ -691,7 +973,7 @@ async def upload_and_process_video(
 @app.post("/search-video", response_model=SearchVideoResponse,
           summary="Search videos by text or image query")
 async def search_video(
-    query_text: Optional[str] = Body(
+    query_text: Optional[str] = Form(
         None, description="Text query for video search."),
     query_image: Optional[UploadFile] = File(
         None, description="Image file to use as query for video search.")
@@ -841,6 +1123,58 @@ async def search_video(
                             detail=f"Internal server error during video search: {e}") from e
 
 
+@app.post("/reset-database", response_model=ResetDatabaseResponse,
+          summary="Clear the vector database and optionally uploaded media")
+async def reset_database(request: ResetDatabaseRequest):
+    """Reset search embeddings, optionally removing app-managed media files."""
+    if vectordb is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vector database is not initialized.")
+
+    active_jobs = [
+        job for job in await video_job_manager.list()
+        if job.status in {"queued", "running", "paused", "cancelling"}
+    ]
+    if active_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Finish or cancel active video jobs before resetting the database.",
+        )
+
+    async with vector_database_lock:
+        deleted_entries = await run_in_threadpool(vectordb.get_total_count)
+        await run_in_threadpool(vectordb.reset)
+
+    deleted_media_items = 0
+    if request.delete_media:
+        media_directories = [
+            UPLOADED_IMAGES_DIR,
+            VIDEO_UPLOAD_DIR,
+            FRAMES_DIR,
+            LEGACY_FRAMES_DIR,
+            VIDEO_CLIPS_DIR,
+            UPLOAD_TEMP_DIR,
+        ]
+        for directory in dict.fromkeys(media_directories):
+            deleted_media_items += await run_in_threadpool(
+                clear_directory_contents, directory)
+
+    message = (
+        "Database and uploaded media reset."
+        if request.delete_media
+        else "Search database cleared. Uploaded media was kept."
+    )
+    logger.warning(
+        "%s Deleted entries: %d. Deleted media items: %d.",
+        message, deleted_entries, deleted_media_items)
+    return ResetDatabaseResponse(
+        message=message,
+        deleted_entries=deleted_entries,
+        deleted_media_items=deleted_media_items,
+    )
+
+
 @app.get("/health", response_model=HealthCheckResponse, summary="Check API and core component health")
 async def health_check():
     """
@@ -850,6 +1184,8 @@ async def health_check():
     status_details = "All core components initialized and ready."
     is_ready = True
     entry_count = 0
+    compute_device = str(getattr(embedder, "device", "unavailable"))
+    cuda_available = compute_device.startswith("cuda")
 
     if embedder is None or vectordb is None:
         is_ready = False
@@ -870,5 +1206,8 @@ async def health_check():
         embedding_model_loaded=embedder is not None,
         vector_database_loaded=vectordb is not None,
         database_entry_count=entry_count,
+        compute_device=compute_device,
+        cuda_available=cuda_available,
+        video_worker_count=VIDEO_JOB_WORKERS,
         details=status_details
     )

@@ -31,9 +31,9 @@ export const useTranslation = () => {
     const loadTranslations = async () => {
       setIsLoadingTranslations(true);
       try {
-        const module = languageMap[language];
-        if (module) {
-          const loadedTranslations = await module();
+        const loadLanguage = languageMap[language];
+        if (loadLanguage) {
+          const loadedTranslations = await loadLanguage();
           setTranslations(loadedTranslations.default);
         } else {
           console.warn(`No translations found for language: ${language}. Falling back to English.`);

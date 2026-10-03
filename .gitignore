@@ -3,6 +3,9 @@ database/raw/video/*
 */*.DS_Store
 *.mp4
 *.mkv
+.venv/
+__pycache__/
+*.py[cod]
 
 # excepects
 !database/raw/*

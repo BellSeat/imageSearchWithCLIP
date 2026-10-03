@@ -116,3 +116,10 @@ class VectorDatabase:
         if self.index is None:
             raise ValueError("Index not initialized.")
         return self.index.ntotal
+
+    def reset(self):
+        """Replace the current index and metadata with an empty database."""
+        self.index = faiss.IndexFlatL2(self.vector_dim)
+        self.metadata = []
+        self.save()
+        logger.info("Vector database reset successfully.")
