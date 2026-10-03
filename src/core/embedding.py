@@ -12,13 +12,21 @@ class Embedding:
     """
     A class to handle image and text embedding using the CLIP model.
     """
-    def __init__(self, config_path: str = "config/config.json"):
+    def __init__(self, config_path: Optional[str] = None):
         """
         Initializes the Embedding class, loading the CLIP model based on configuration.
 
         Args:
             config_path (str): Path to the JSON configuration file.
         """
+        if config_path is None:
+            # Resolve default config relative to this file so imports work from any CWD.
+            config_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "config", "config.json")
+            )
+        else:
+            config_path = os.path.abspath(config_path)
+
         try:
             with open(config_path, 'r', encoding='utf-8') as f: # Explicitly specify encoding
                 config = json.load(f)
@@ -198,4 +206,3 @@ class Embedding:
         except Exception as e:
             print(f"[ERROR] An unexpected error occurred during batch embedding from JSON: {e}. Returning empty list.")
             return []
-

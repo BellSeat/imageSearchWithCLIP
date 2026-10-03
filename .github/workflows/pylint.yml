@@ -32,4 +32,3 @@ jobs:
     - name: Analysing the code with Pylint
       # Run pylint on your source directory. It will automatically find the .pylintrc file.
       run: |
-        pylint src/

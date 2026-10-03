@@ -37,6 +37,8 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, "..", "config", "config.json")
 
 UPLOAD_TEMP_DIR = os.path.join(SCRIPT_DIR, "temp_uploads") 
 
+RUNTIME_CONFIG_PATH = os.path.join(UPLOAD_TEMP_DIR, "runtime_config.json")
+
 # Root for all static content served by FastAPI
 STATIC_CONTENT_ROOT = os.path.abspath(
     os.path.join(SCRIPT_DIR, "..", "database"))
@@ -60,6 +62,9 @@ os.makedirs(FRAMES_DIR, exist_ok=True)
 os.makedirs(UPLOADED_IMAGES_DIR, exist_ok=True)
 os.makedirs(VIDEO_UPLOAD_DIR, exist_ok=True)
 os.makedirs(VIDEO_CLIPS_DIR, exist_ok=True)
+
+embedder = None
+vectordb = None
 
 
 app = FastAPI(
@@ -267,6 +272,7 @@ def get_web_url_from_fs_path(fs_path: str) -> str:
     return web_url
 
 
+<<<<<<< HEAD
 def clear_directory_contents(directory: str) -> int:
     """Remove files and subdirectories owned by the application."""
     if not os.path.isdir(directory):
@@ -392,6 +398,53 @@ async def process_video_job(job: VideoJob):
             job.id, status="failed", stage="Failed", error=str(error))
         logger.error("Video job %s failed for %s: %s", job.id, job.filename, error,
                      exc_info=True)
+=======
+def _resolve_storage_path(path_value: str) -> str:
+    """
+    Normalizes a configured storage path so it points inside this repo.
+    Handles legacy '/database/...' locations that would otherwise use the
+    filesystem root, which fails in sandboxed environments.
+    """
+    if not path_value:
+        raise ValueError("Encountered empty storage path in configuration.")
+
+    cleaned = os.path.normpath(path_value.strip())
+    cleaned_posix = cleaned.replace("\\", "/")
+
+    if os.path.isabs(cleaned):
+        if cleaned_posix.startswith("/database/"):
+            rel = cleaned_posix[len("/database/"):]
+            return os.path.abspath(os.path.join(STATIC_CONTENT_ROOT, rel))
+        return cleaned
+
+    if cleaned_posix.startswith("database/"):
+        rel = cleaned_posix.split("database/", 1)[1]
+        return os.path.abspath(os.path.join(STATIC_CONTENT_ROOT, rel))
+
+    return os.path.abspath(os.path.join(STATIC_CONTENT_ROOT, cleaned))
+
+
+def _prepare_runtime_config(source_config_path: str, runtime_config_path: str) -> str:
+    """
+    Loads the JSON config, normalizes storage paths so they stay inside the
+    repository, and writes the resolved config to a runtime file.
+    Returns the path to the runtime config file.
+    """
+    with open(source_config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+
+    index_cfg = config.get("index", {})
+    for key in ("INDEX_PATH", "META_PATH"):
+        if key in index_cfg and index_cfg[key]:
+            index_cfg[key] = _resolve_storage_path(index_cfg[key])
+    config["index"] = index_cfg
+
+    os.makedirs(os.path.dirname(runtime_config_path), exist_ok=True)
+    with open(runtime_config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4)
+
+    return runtime_config_path
+>>>>>>> d581699f92f08193a0cc088cefa2adb7bf3eea4a
 
 
 # --- FastAPI Lifespan Events ---
@@ -403,14 +456,17 @@ async def startup_event():
     logger.info("FastAPI application startup initiated.")
     global embedder, vectordb
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        logger.info(f"Configuration loaded from: {CONFIG_PATH}")
+        runtime_config_path = _prepare_runtime_config(
+            CONFIG_PATH, RUNTIME_CONFIG_PATH)
+        logger.info(
+            f"Configuration loaded from: {CONFIG_PATH} "
+            f"(runtime copy: {runtime_config_path})"
+        )
 
-        embedder = await run_in_threadpool(Embedding, config_path=CONFIG_PATH)
+        embedder = await run_in_threadpool(Embedding, config_path=runtime_config_path)
         logger.info("CLIP Embedding model initialized successfully.")
 
-        vectordb = await run_in_threadpool(VectorDatabase, config_path=CONFIG_PATH)
+        vectordb = await run_in_threadpool(VectorDatabase, config_path=runtime_config_path)
         await run_in_threadpool(vectordb.load)
         logger.info(
             f"Vector Database initialized and loaded. Current entries: {vectordb.get_total_count()}")

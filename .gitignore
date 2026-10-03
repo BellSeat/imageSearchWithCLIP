@@ -1,11 +1,24 @@
 database/raw/video/*
 *.log
 */*.DS_Store
+
+# Video files
 *.mp4
 *.mkv
 .venv/
 __pycache__/
 *.py[cod]
+
+# database files
+*.pkl
+*.index
+
+# Image files
+*.gif
+*.png
+*.jpg
+*.jpeg
+
 
 # excepects
 !database/raw/*
